@@ -40,8 +40,8 @@ viewindexing() = LinearFast()
 viewindexing(I::Tuple{ScalarIndex, Vararg{Any}}) = (@_inline_meta; viewindexing(tail(I)))
 # Colons may begin a section which may be followed by any number of Colons
 viewindexing(I::Tuple{Colon, Colon, Vararg{Any}}) = (@_inline_meta; viewindexing(tail(I)))
-# A UnitRange can follow Colons, but only if all other indices are scalar
-viewindexing(I::Tuple{Colon, UnitRange, Vararg{ScalarIndex}}) = LinearFast()
+# An AbstractUnitRange can follow Colons, but only if all other indices are scalar
+viewindexing(I::Tuple{Colon, AbstractUnitRange, Vararg{ScalarIndex}}) = LinearFast()
 # In general, ranges are only fast if all other indices are scalar
 viewindexing(I::Tuple{Union{Range, Colon}, Vararg{ScalarIndex}}) = LinearFast()
 # All other index combinations are slow
@@ -156,8 +156,8 @@ function getindex(V::FastSubArray, i::Real)
     @inbounds r = V.parent[V.offset1 + V.stride1*to_index(i)]
     r
 end
-# We can avoid a multiplication if the first parent index is a Colon or UnitRange
-typealias FastContiguousSubArray{T,N,P,I<:Tuple{Union{Colon, UnitRange}, Vararg{Any}}} SubArray{T,N,P,I,true}
+# We can avoid a multiplication if the first parent index is a Colon or AbstractUnitRange
+typealias FastContiguousSubArray{T,N,P,I<:Tuple{Union{Colon, AbstractUnitRange}, Vararg{Any}}} SubArray{T,N,P,I,true}
 function getindex(V::FastContiguousSubArray, i::Real)
     @_inline_meta
     @boundscheck checkbounds(V, i)
