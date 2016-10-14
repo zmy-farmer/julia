@@ -471,6 +471,14 @@ ifeq ($(BUILD_LLVM_CLANG),1)
 $(eval $(call LLVM_PATCH,compiler-rt-3.7.1))
 endif
 endif
+
+# Remove hardcoded OS X requirements in compilter-rt cmake build
+ifeq ($(LLVM_VER_SHORT),3.9)
+ifeq ($(BUILD_LLVM_CLANG),1)
+$(eval $(call LLVM_PATCH,llvm-3.9-osx-10.12))
+endif
+endif
+
 $(LLVM_BUILDDIR_withtype)/build-configured: $(LLVM_PATCH_PREV)
 
 ifeq ($(LLVM_USE_CMAKE),1)
