@@ -26,24 +26,35 @@ introducing scope blocks are:
 
 .. _man-scope-table:
 
-+--------------------------------+----------------------------------------------------------------------------------+
-| Scope name                     | block/construct introducing this kind of scope                                   |
-+================================+==================================================================================+
-| :ref:`global <man-global>`     | module, baremodule, at interactive prompt (REPL)                                 |
-+--------------------------------+------------------------------+---------------------------------------------------+
-| :ref:`local <man-local-scope>` | :ref:`soft <man-soft-scope>` | for, while, comprehensions,                       |
-|                                |                              | try-catch-finally, let                            |
-|                                +------------------------------+---------------------------------------------------+
-|                                | :ref:`hard <man-hard-scope>` | functions (either syntax, anonymous & do-blocks), |
-|                                |                              | type, immutable, macro                            |
-+--------------------------------+------------------------------+---------------------------------------------------+
+* Scope blocks that may nest only in other global scope blocks:
 
-Notably missing from this table are :ref:`begin blocks
-<man-compound-expressions>` and :ref:`if blocks
-<man-conditional-evaluation>`, which do *not* introduce new scope
-blocks.  All three types of scopes follow somewhat different rules
-which will be explained below as well as some extra rules for
-certain blocks.
+  - global scope
+
+    + module, baremodule
+
+    + at interactive prompt (REPL)
+
+  - local scope (don't allow nesting)
+
+    + type, immutable, macro
+
+* Scope blocks which may nest anywhere (in global or local scope):
+
+  - local scope
+
+    + for, while, try-catch-finally, let
+
+    + functions (either syntax, anonymous & do-blocks)
+
+    + comprehensions, broadcast-fusing
+
+
+Notably missing from this table are
+:ref:`begin blocks <man-compound-expressions>`
+and :ref:`if blocks <man-conditional-evaluation>`,
+which do *not* introduce new scope blocks.
+Both types of scopes follow somewhat different rules
+which will be explained below.
 
 Julia uses `lexical scoping <https://en.wikipedia.org/wiki/Scope_%28computer_science%29#Lexical_scoping_vs._dynamic_scoping>`_,
 meaning that a function's scope does not inherit from its caller's
@@ -117,24 +128,29 @@ changed within their global scope and not from an outside module.
 Note that the interactive prompt (aka REPL) is in the global scope of
 the module ``Main``.
 
+Within the global scopes, the `global` keyword is never necessary,
+although allowed.
+
+
 .. _man-local-scope:
 
 Local Scope
 -----------
 
-A new local scope is introduced by most code-blocks, see above
-:ref:`table <man-scope-table>` for a complete list.  A local scope
-*usually* inherits all the variables from its parent scope, both for
-reading and writing.  There are two subtypes of local scopes, hard and
-soft, with slightly different rules concerning what variables are
-inherited.  Unlike global scopes, local scopes are not namespaces,
+A new local scope is introduced by most code blocks (see above
+:ref:`table <man-scope-table>` for a complete list).
+A local scope inherits all the variables from a parent local scope,
+both for reading and writing.
+Additionally, the local scope inherits all globals that are assigned
+to in its parent global scope block (if it is surrounded by a global `if` or `begin` scope).
+Unlike global scopes, local scopes are not namespaces,
 thus variables in an inner scope cannot be retrieved from the parent
 scope through some sort of qualified access.
 
-The following rules and examples pertain to both hard and soft local
-scopes.  A newly introduced variable in a local scope does not
-back-propagate to its parent scope.  For example, here the ``z`` is not
-introduced into the top-level scope:
+The following rules and examples pertain to local scopes.
+A newly introduced variable in a local scope does not
+back-propagate to its parent scope.
+For example, here the ``z`` is not introduced into the top-level scope:
 
 .. doctest::
 
@@ -155,17 +171,17 @@ using the ``local`` keyword:
 
 .. doctest::
 
-    julia> x = 0;
+    julia> x = 0
 
     julia> for i = 1:10
-               local x
+               local x # this is the default
                x = i + 1
            end
 
     julia> x
     0
 
-Inside a local scope a new global variable can be defined using the
+Inside a local scope a global variable can be assigned to by using the
 keyword ``global``:
 
 .. doctest::
@@ -183,7 +199,7 @@ keyword ``global``:
    parent local scope.
 
 The location of both the ``local`` and ``global`` keywords within the
-scope block is irrelevant.  The following is equivalent to the last
+scope block is irrelevant. The following is equivalent to the last
 example (although stylistically worse):
 
 .. doctest::
@@ -196,71 +212,22 @@ example (although stylistically worse):
     julia> z
     10
 
-Multiple global or local definitions can be on one line and can also
-be paired with assignments:
+Multiple global or local definitions can be on one line (or split across several lines)
+and can also be paired with assignments:
 
 .. doctest::
 
     julia> for i = 1:10
                global x = i, y, z
-               local a = 4, b, c = 1
+               local a = 4, b,
+                     c = 1
            end
 
+Local scopes are introduced by most block keywords,
+with notable exceptions of `begin` and `if`.
 
-.. _man-soft-scope:
-
-Soft Local Scope
-^^^^^^^^^^^^^^^^
-
-   In a soft local scope, all variables are inherited from its parent
-   scope unless a variable is specifically marked with the keyword
-   ``local``.
-
-Soft local scopes are introduced by for-loops, while-loops,
-comprehensions, try-catch-finally-blocks, and let-blocks.  There
-are some extra rules for :ref:`let-blocks <man-let-blocks>` and for
-:ref:`for-loops and comprehensions <man-for-loops-scope>`.
-
-In the following example the ``x`` and ``y`` refer always to the same
-variables as the soft local scope inherits both read and write
-variables:
-
-.. doctest::
-
-    julia> x, y = 0, 1;
-
-    julia> for i = 1:10
-               x = i + y + 1
-           end
-
-    julia> x
-    12
-
-Within soft scopes, the `global` keyword is never necessary, although
-allowed.  The only case when it would change the semantics is
-(currently) a syntax error:
-
-.. doctest::
-
-    julia> let
-               local j = 2
-               let
-                   global j = 3
-               end
-           end
-    ERROR: syntax: `global j`: j is local variable in the enclosing scope
-    ...
-
-.. _man-hard-scope:
-
-Hard Local Scope
-^^^^^^^^^^^^^^^^
-
-Hard local scopes are introduced by function definitions (in all their
-forms), type & immutable-blocks, and macro-definitions.
-
-   In a hard local scope, all variables are inherited from its parent
-   scope unless:
+In a local scope, all variables are inherited from its parent
+global scope block unless:
 
    - an assignment would result in a modified *global* variable, or
    - a variable is specifically marked with the keyword ``local``.
@@ -270,12 +237,12 @@ writing:
 
 .. doctest::
 
-    julia> x, y = 1, 2;
+    julia> x, y = 1, 2
 
     julia> function foo()
                x = 2 # assignment introduces a new local
-               return x + y # y refers to the global
-           end;
+           return x + y # y refers to the global
+       end
 
     julia> foo()
     4
@@ -285,69 +252,88 @@ writing:
 
 An explicit ``global`` is needed to assign to a global variable:
 
+.. sidebar:: Avoiding globals
+
+    Avoiding changing the value of global variables is considered by many
+    to be a programming best-practice.
+    One reason for this is that remotely changing the state of global variables in other
+    modules should be done with care as it makes the local behavior of the program hard to reason about.
+    This is why the scope blocks that introduce local scope require the ``global``
+    keyword to declare the intent to modify a global variable.
+
 .. doctest::
-
-    julia> x = 1;
-
-    julia> function foobar()
-               global x = 2
-           end;
 
     julia> foobar();
 
     julia> x
     2
 
-Note that *nested functions* can behave differently to functions
-defined in the global scope as they can modify their parent scope's
+Note that *nested functions* can also modify their parent scope's
 *local* variables:
 
 .. doctest::
 
-    julia> x, y = 1, 2;
+    julia> x, y = 1, 2
 
-    julia> function baz()
+    julia> function foo()
                x = 2 # introduces a new local
                function bar()
                    x = 10 # modifies the parent's x
                    return x + y # y is global
                end
                return bar() + x # 12 + 10 (x is modified in call of bar())
-           end;
+           end
 
-    julia> baz()
-    22
+    julia> foo()
+    22  # (global x and y unchanged)
 
-    julia> x, y
-    (1,2)
+The reason to allow *modifying local* variables of parent scopes in
+nested functions is to allow constructing `closures
+<https://en.wikipedia.org/wiki/Closure_%28computer_programming%29>`_
+which have a private state, for instance the ``state`` variable in the
+following example:
 
-The distinction between inheriting global and local variables for
-assignment can lead to some slight differences between functions
-defined in local vs. global scopes.  Consider the modification of the
+.. doctest::
+
+    julia> let
+               state = 0
+               global counter
+               counter() = state += 1
+           end
+
+    julia> counter()
+    1
+
+    julia> counter()
+    2
+
+See also the closures in the examples in the next two sections.
+
+The distinction between inheriting global scope and nesting local scope
+can lead to some slight differences between functions
+defined in local vs. global scopes for variable assignments.
+Consider the modification of the
 last example by moving ``bar`` to the global scope:
 
 .. doctest::
 
-    julia> x, y = 1, 2;
-
+    julia> x, y = 1, 2
 
     julia> function bar()
                x = 10 # local
                return x + y
-           end;
+           end
 
-    julia> function quz()
+    julia> function foo()
                x = 2 # local
                return bar() + x # 12 + 2 (x is not modified)
-           end;
+           end
 
-    julia> quz()
-    14
+    julia> foo()
+    14 # as x is not modified anymore.
+       # (x and y unchanged)
 
-    julia> x, y
-    (1,2)
-
-Note that above subtlety does not pertain to type and macro
+Note that the above nesting rules do not pertain to type and macro
 definitions as they can only appear at the global scope.
 There are special scoping rules concerning the evaluation of default
 and keyword function arguments which are described in the
@@ -384,9 +370,9 @@ positive integers are even or odd:
 
 .. doctest::
 
-    julia> even(n) = n == 0 ? true : odd(n-1);
+    julia> even(n) = n == 0 ? true  :  odd(n - 1);
 
-    julia> odd(n) = n == 0 ? false : even(n-1);
+    julia> odd(n)  = n == 0 ? false : even(n - 1);
 
     julia> even(3)
     false
@@ -396,43 +382,8 @@ positive integers are even or odd:
 
 Julia provides built-in, efficient functions to test for oddness and evenness
 called :func:`iseven` and :func:`isodd` so the above definitions should only be
-taken as examples.
+taken as examples of scope, not usage.
 
-Hard vs. Soft Local Scope
-^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Blocks which introduce a soft local scope, such as loops, are
-generally used to manipulate the variables in their parent scope.
-Thus their default is to fully access all variables in their parent
-scope.
-
-Conversely, the code inside blocks which introduce a hard local scope
-(function, type, and macro definitions) can be executed at any place in
-a program.  Remotely changing the state of global variables in other
-modules should be done with care and thus this is an opt-in feature
-requiring the ``global`` keyword.
-
-The reason to allow *modifying local* variables of parent scopes in
-nested functions is to allow constructing `closures
-<https://en.wikipedia.org/wiki/Closure_%28computer_programming%29>`_
-which have a private state, for instance the ``state`` variable in the
-following example:
-
-.. doctest::
-
-    julia> let
-               state = 0
-               global counter
-               counter() = state += 1
-           end;
-
-    julia> counter()
-    1
-
-    julia> counter()
-    2
-
-See also the closures in the examples in the next two sections.
 
 .. _man-let-blocks:
 
