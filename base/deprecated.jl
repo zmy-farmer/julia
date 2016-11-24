@@ -1129,4 +1129,6 @@ eval(Base.Dates, quote
      recur{T<:TimeType}(fun::Function, start::T, stop::T; step::Period=Day(1), negate::Bool=false, limit::Int=10000) = recur(fun, start:step:stop; negate=negate)
 end)
 
+is_intrinsic_expr(x::ANY) = false
+
 # End deprecations scheduled for 0.6
