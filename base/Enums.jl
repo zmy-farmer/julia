@@ -94,7 +94,7 @@ macro enum(T,syms...)
         Base.@__doc__(bitstype 32 $(esc(T)) <: Enum)
         function Base.convert(::Type{$(esc(typename))}, x::Integer)
             $(membershiptest(:x, values)) || enum_argument_error($(Expr(:quote, typename)), x)
-            box($(esc(typename)), convert(Int32, x))
+            return box($(esc(typename)), convert(Int32, x))
         end
         Base.typemin(x::Type{$(esc(typename))}) = $(esc(typename))($lo)
         Base.typemax(x::Type{$(esc(typename))}) = $(esc(typename))($hi)
