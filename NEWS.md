@@ -30,6 +30,11 @@ Breaking changes
 
 This section lists changes that do not have deprecation warnings.
 
+  * `String`s no longer have a `.data` field (as part of a significant performance
+    improvement). Use `Vector{UInt8}(str)` to access a string as a byte array.
+    However, allocating the `Vector` object has overhead. You can also use
+    `codeunit(str, i)` to access the `i`th byte of a `String`. ([#19449])
+
   * Operations between `Float16` and `Integers` now return `Float16` instead of `Float32`. ([#17261])
 
   * Keyword arguments are processed left-to-right: if the same keyword is specified more than
@@ -748,17 +753,17 @@ Language tooling improvements
 [#17510]: https://github.com/JuliaLang/julia/issues/17510
 [#17546]: https://github.com/JuliaLang/julia/issues/17546
 [#17599]: https://github.com/JuliaLang/julia/issues/17599
+[#17623]: https://github.com/JuliaLang/julia/issues/17623
 [#17668]: https://github.com/JuliaLang/julia/issues/17668
 [#17758]: https://github.com/JuliaLang/julia/issues/17758
 [#17785]: https://github.com/JuliaLang/julia/issues/17785
 [#18330]: https://github.com/JuliaLang/julia/issues/18330
 [#18339]: https://github.com/JuliaLang/julia/issues/18339
 [#18346]: https://github.com/JuliaLang/julia/issues/18346
-[#18442]: https://github.com/JuliaLang/julia/issues/18442
 [#18473]: https://github.com/JuliaLang/julia/issues/18473
+[#18628]: https://github.com/JuliaLang/julia/issues/18628
 [#18644]: https://github.com/JuliaLang/julia/issues/18644
 [#18690]: https://github.com/JuliaLang/julia/issues/18690
-[#18628]: https://github.com/JuliaLang/julia/issues/18628
 [#18839]: https://github.com/JuliaLang/julia/issues/18839
 [#18931]: https://github.com/JuliaLang/julia/issues/18931
 [#18965]: https://github.com/JuliaLang/julia/issues/18965
@@ -767,4 +772,7 @@ Language tooling improvements
 [#19233]: https://github.com/JuliaLang/julia/issues/19233
 [#19288]: https://github.com/JuliaLang/julia/issues/19288
 [#19305]: https://github.com/JuliaLang/julia/issues/19305
+[#19449]: https://github.com/JuliaLang/julia/issues/19449
 [#19469]: https://github.com/JuliaLang/julia/issues/19469
+[#19543]: https://github.com/JuliaLang/julia/issues/19543
+[#19598]: https://github.com/JuliaLang/julia/issues/19598
