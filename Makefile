@@ -477,6 +477,10 @@ else
 endif
 	rm -fr $(BUILDROOT)/julia-$(JULIA_COMMIT)
 
+app:
+	$(MAKE) -C contrib/mac/app
+	-mv contrib/mac/app/$(JULIA_BINARYDIST_FILENAME).dmg $(BUILDROOT)
+
 # this target does not accept BUILDROOT
 light-source-dist.tmp: $(JULIAHOME)/doc/_build/html
 	# Save git information
