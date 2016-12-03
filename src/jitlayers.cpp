@@ -366,7 +366,12 @@ void JuliaOJIT::DebugObjectRegistrar::operator()(ObjectLinkingLayerBase::ObjSetH
             // This is unfortunate, but there doesn't seem to be a way to take
             // ownership of the original buffer
             auto NewBuffer = MemoryBuffer::getMemBufferCopy(Object->getData(), Object->getFileName());
+#ifndef FORCE_ELF
             auto NewObj = ObjectFile::createObjectFile(NewBuffer->getMemBufferRef());
+#else
+            auto NewObj = ObjectFile::createObjectFile(NewBuffer->getMemBufferRef(),
+                                                       llvm::sys::fs::file_magic::elf);
+#endif
             assert(NewObj);
             SavedObject = OwningBinary<object::ObjectFile>(std::move(*NewObj),std::move(NewBuffer));
         }
@@ -434,7 +439,12 @@ JuliaOJIT::JuliaOJIT(TargetMachine &TM)
                 PM.run(M);
                 std::unique_ptr<MemoryBuffer> ObjBuffer(
                     new ObjectMemoryBuffer(std::move(ObjBufferSV)));
+#ifndef FORCE_ELF
                 auto Obj = object::ObjectFile::createObjectFile(ObjBuffer->getMemBufferRef());
+#else
+                auto Obj = object::ObjectFile::createObjectFile(ObjBuffer->getMemBufferRef(),
+                                                                llvm::sys::fs::file_magic::elf);
+#endif
 
                 if (!Obj) {
                     M.dump();
