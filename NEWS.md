@@ -57,6 +57,9 @@ This section lists changes that do not have deprecation warnings.
     The flip-side of this is that new method definitions should now reliably actually
     take effect, and be called when evaluating new code ([#265]).
 
+  * `@async`, `@spawn`, `@spawnat`, `@fetch`, `@fetchfrom` and `@parallel` no longer localize
+    expression variables.
+
 Library improvements
 --------------------
 
