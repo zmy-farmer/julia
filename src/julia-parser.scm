@@ -7,7 +7,7 @@
 ;; the way the lexer works, every prefix of an operator must also
 ;; be an operator.
 (define prec-assignment
-  (append! (add-dots '(= += -= *= /= //= |\\=| ^= ÷= %= <<= >>= >>>= |\|=| &=))
+  (append! (add-dots '(= += -= *= /= //= |\\=| ^= ÷= %= <<= >>= >>>= |\|=| &= ⊻=))
            '(:= => ~ $=)))
 (define prec-conditional '(?))
 (define prec-arrow       (append!
@@ -77,7 +77,7 @@
 
 ; operators that are special forms, not function names
 (define syntactic-operators
-  (append! (add-dots '(= += -= *= /= //= |\\=| ^= ÷= %= <<= >>= >>>= |\|=| &=))
+  (append! (add-dots '(= += -= *= /= //= |\\=| ^= ÷= %= <<= >>= >>>= |\|=| &= ⊻=))
            '(:= --> $= => && |\|\|| |.| ... ->)))
 (define syntactic-unary-operators '($ & |::|))
 
@@ -1067,13 +1067,14 @@
              (take-token s)
              (loop (list* 'curly ex (parse-arglist s #\} ))))
             ((#\" #\`)
-             (if (and (symbol? ex) (not (operator? ex))
+             (if (and (or (symbol? ex) (valid-modref? ex))
+                      (not (operator? ex))
                       (not (ts:space? s)))
                  ;; custom string and command literals; x"s" => @x_str "s"
                  (let* ((macstr (begin (take-token s)
                                        (parse-raw-literal s t)))
                         (nxt (peek-token s))
-                        (macname (symbol (string #\@ ex (macsuffix t)))))
+                        (macname (macroify-name ex (macsuffix t))))
                    (if (and (symbol? nxt) (not (operator? nxt))
                             (not (ts:space? s)))
                        ;; string literal suffix, "s"x
@@ -1218,11 +1219,8 @@
         (list 'bitstype (with-space-sensitive (parse-cond s))
               (parse-subtype-spec s)))
        ((typealias)
-        (let ((lhs (parse-call s)))
-          (if (and (pair? lhs) (eq? (car lhs) 'call))
-              ;; typealias X (...) is tuple type alias, not call
-              (list 'typealias (cadr lhs) (cons 'tuple (cddr lhs)))
-              (list 'typealias lhs (parse-arrow s)))))
+        (let ((lhs (with-space-sensitive (parse-call s))))
+              (list 'typealias lhs (parse-arrow s))))
        ((try)
         (let ((try-block (if (memq (require-token s) '(catch finally))
                              '(block)
@@ -1549,11 +1547,12 @@
           `(generator ,first ,@iters)))))
 
 (define (parse-comprehension s first closer)
-  (let ((gen (parse-generator s first)))
-    (if (not (eqv? (require-token s) closer))
-        (error (string "expected \"" closer "\""))
-        (take-token s))
-    `(comprehension ,gen)))
+  (with-whitespace-newline
+   (let ((gen (parse-generator s first)))
+     (if (not (eqv? (require-token s) closer))
+         (error (string "expected \"" closer "\""))
+         (take-token s))
+     `(comprehension ,gen))))
 
 (define (parse-dict-comprehension s first closer)
   (let ((c (parse-comprehension s first closer)))
@@ -2060,10 +2059,11 @@
        (or (symbol? (cadr e))
            (valid-modref? (cadr e)))))
 
-(define (macroify-name e)
-  (cond ((symbol? e)  (symbol (string #\@ e)))
-        ((valid-modref? e)  `(|.| ,(cadr e)
-                              (quote ,(macroify-name (cadr (caddr e))))))
+(define (macroify-name e . suffixes)
+  (cond ((symbol? e) (symbol (apply string #\@ e suffixes)))
+        ((valid-modref? e)
+         `(|.| ,(cadr e)
+               (quote ,(apply macroify-name (cadr (caddr e)) suffixes))))
         (else (error (string "invalid macro use \"@(" (deparse e) ")\"" )))))
 
 (define (simple-string-literal? e) (string? e))

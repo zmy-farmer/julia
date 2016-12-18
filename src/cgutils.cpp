@@ -26,6 +26,18 @@ static Value *prepare_call(Value *Callee)
 }
 
 
+// --- language feature checks ---
+
+// branch on whether a language feature is enabled or not
+#define JL_FEAT_TEST(ctx, feature) ((ctx)->params->feature)
+
+// require a language feature to be enabled
+#define JL_FEAT_REQUIRE(ctx, feature) \
+    if (!JL_FEAT_TEST(ctx, feature)) \
+        jl_errorf("%s for %s:%d requires the " #feature " language feature, which is disabled", \
+                  __FUNCTION__, (ctx)->file.str().c_str(), *(ctx)->line);
+
+
 // --- string constants ---
 static StringMap<GlobalVariable*> stringConstants;
 static Value *stringConstPtr(IRBuilder<> &builder, const std::string &txt)
@@ -123,7 +135,14 @@ static DIType julia_type_to_di(jl_value_t *jt, DIBuilder *dbuilder, bool isboxed
     }
     if (jl_is_bitstype(jt)) {
         uint64_t SizeInBits = jl_datatype_nbits(jdt);
-    #if JL_LLVM_VERSION >= 30700
+    #if JL_LLVM_VERSION >= 40000
+        llvm::DIType *t = dbuilder->createBasicType(
+                jl_symbol_name(jdt->name->name),
+                SizeInBits,
+                llvm::dwarf::DW_ATE_unsigned);
+        jdt->ditype = t;
+        return t;
+    #elif JL_LLVM_VERSION >= 30700
         llvm::DIType *t = dbuilder->createBasicType(
                 jl_symbol_name(jdt->name->name),
                 SizeInBits,
@@ -653,6 +672,7 @@ static void error_unless(Value *cond, const std::string &msg, jl_codectx_t *ctx)
 static void raise_exception(Value *exc, jl_codectx_t *ctx,
                             BasicBlock *contBB=nullptr)
 {
+    JL_FEAT_REQUIRE(ctx, runtime);
 #if JL_LLVM_VERSION >= 30700
     builder.CreateCall(prepare_call(jlthrow_func), { exc });
 #else
@@ -1054,7 +1074,7 @@ static bool emit_getfield_unknownidx(jl_cgval_t *ret, const jl_cgval_t &strct, V
 
 static jl_cgval_t emit_getfield_knownidx(const jl_cgval_t &strct, unsigned idx, jl_datatype_t *jt, jl_codectx_t *ctx)
 {
-    jl_value_t *jfty = jl_field_type(jt,idx);
+    jl_value_t *jfty = jl_field_type(jt, idx);
     Type *elty = julia_type_to_llvm(jfty);
     assert(elty != NULL);
     if (jfty == jl_bottom_type) {
@@ -1064,39 +1084,28 @@ static jl_cgval_t emit_getfield_knownidx(const jl_cgval_t &strct, unsigned idx, 
     if (type_is_ghost(elty))
         return ghostValue(jfty);
     Value *fldv = NULL;
-    if (strct.isboxed) {
-        Value *addr =
-            builder.CreateGEP(emit_bitcast(boxed(strct, ctx), T_pint8),
-                              ConstantInt::get(T_size, jl_field_offset(jt,idx)));
-        MDNode *tbaa = strct.tbaa;
+    if (strct.ispointer()) {
+        Value *addr;
+        Value *ptr = data_pointer(strct, ctx, T_pint8);
+        Value *llvm_idx = ConstantInt::get(T_size, jl_field_offset(jt, idx));
+        addr = builder.CreateGEP(ptr, llvm_idx);
         if (jl_field_isptr(jt, idx)) {
-            Value *fldv = tbaa_decorate(tbaa, builder.CreateLoad(emit_bitcast(addr, T_ppjlvalue)));
+            Value *fldv = tbaa_decorate(strct.tbaa, builder.CreateLoad(emit_bitcast(addr, T_ppjlvalue)));
             if (idx >= (unsigned)jt->ninitialized)
                 null_pointer_check(fldv, ctx);
-            jl_cgval_t ret = mark_julia_type(fldv, true, jfty, ctx, strct.gcroot || !strct.isimmutable);
-            return ret;
+            return mark_julia_type(fldv, true, jfty, ctx, strct.gcroot || !strct.isimmutable);
         }
-        else {
-            int align = jl_field_offset(jt,idx);
-            align |= 16;
-            align &= -align;
-            return typed_load(addr, ConstantInt::get(T_size, 0), jfty, ctx, tbaa, align);
+        else if (!jt->mutabl) {
+            // just compute the pointer and let user load it when necessary
+            jl_cgval_t fieldval = mark_julia_slot(addr, jfty, strct.tbaa);
+            fieldval.isimmutable = strct.isimmutable;
+            fieldval.gcroot = strct.gcroot;
+            return fieldval;
         }
-    }
-    else if (strct.ispointer()) { // something stack allocated
-        Value *addr;
-        if (jl_is_vecelement_type((jl_value_t*)jt))
-            // VecElement types are unwrapped in LLVM.
-            addr = strct.V;
-        else
-            addr = builder.CreateConstInBoundsGEP2_32(
-                LLVM37_param(julia_type_to_llvm(strct.typ))
-                strct.V, 0, idx);
-        assert(!jt->mutabl);
-        jl_cgval_t fieldval = mark_julia_slot(addr, jfty, strct.tbaa);
-        fieldval.isimmutable = strct.isimmutable;
-        fieldval.gcroot = strct.gcroot;
-        return fieldval;
+        int align = jl_field_offset(jt, idx);
+        align |= 16;
+        align &= -align;
+        return typed_load(addr, ConstantInt::get(T_size, 0), jfty, ctx, strct.tbaa, align);
     }
     else if (isa<UndefValue>(strct.V)) {
         return jl_cgval_t();
@@ -1268,7 +1277,8 @@ static Value *emit_arraysize_for_unsafe_dim(const jl_cgval_t &tinfo, jl_value_t 
     return dim > nd ? ConstantInt::get(T_size, 1) : emit_arraysize(tinfo, ex, dim, ctx);
 }
 
-static Value *emit_array_nd_index(const jl_cgval_t &ainfo, jl_value_t *ex, size_t nd, jl_value_t **args,
+// `nd == -1` means the dimension is unknown.
+static Value *emit_array_nd_index(const jl_cgval_t &ainfo, jl_value_t *ex, ssize_t nd, jl_value_t **args,
                                   size_t nidxs, jl_codectx_t *ctx)
 {
     Value *a = boxed(ainfo, ctx);
@@ -1293,6 +1303,7 @@ static Value *emit_array_nd_index(const jl_cgval_t &ainfo, jl_value_t *ex, size_
         ii = builder.CreateSub(idxs[k], ConstantInt::get(T_size, 1));
         i = builder.CreateAdd(i, builder.CreateMul(ii, stride));
         if (k < nidxs-1) {
+            assert(nd >= 0);
             Value *d = emit_arraysize_for_unsafe_dim(ainfo, ex, k+1, nd, ctx);
 #if CHECK_BOUNDS==1
             if (bc) {
@@ -1310,7 +1321,7 @@ static Value *emit_array_nd_index(const jl_cgval_t &ainfo, jl_value_t *ex, size_
     if (bc) {
         // We have already emitted a bounds check for each index except for
         // the last one which we therefore have to do here.
-        bool linear_indexing = nidxs < nd;
+        bool linear_indexing = nd == -1 || nidxs < (size_t)nd;
         if (linear_indexing) {
             // Compare the linearized index `i` against the linearized size of
             // the accessed array, i.e. `if !(i < alen) goto error`.
@@ -1319,6 +1330,7 @@ static Value *emit_array_nd_index(const jl_cgval_t &ainfo, jl_value_t *ex, size_
         } else {
             // Compare the last index of the access against the last dimension of
             // the accessed array, i.e. `if !(last_index < last_dimension) goto error`.
+            assert(nd >= 0);
             Value *last_index = ii;
             Value *last_dimension = emit_arraysize_for_unsafe_dim(ainfo, ex, nidxs, nd, ctx);
             builder.CreateCondBr(builder.CreateICmpULT(last_index, last_dimension), endBB, failBB);
@@ -1570,6 +1582,9 @@ static void emit_cpointercheck(const jl_cgval_t &x, const std::string &msg, jl_c
 // allocation for known size object
 static Value *emit_allocobj(jl_codectx_t *ctx, size_t static_size, Value *jt)
 {
+    JL_FEAT_REQUIRE(ctx, dynamic_alloc);
+    JL_FEAT_REQUIRE(ctx, runtime);
+
     int osize;
     int offset = jl_gc_classify_pools(static_size, &osize);
     Value *ptls_ptr = emit_bitcast(ctx->ptlsStates, T_pint8);

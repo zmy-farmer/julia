@@ -42,6 +42,7 @@ if false
 end
 
 ## Load essential files and libraries
+include("ctypes.jl")
 include("essentials.jl")
 include("base.jl")
 include("generator.jl")
@@ -79,9 +80,9 @@ end
 Symbol(x...) = Symbol(string(x...))
 
 # array structures
+include("array.jl")
 include("abstractarray.jl")
 include("subarray.jl")
-include("array.jl")
 
 # Array convenience converting constructors
 (::Type{Array{T}}){T}(m::Integer) = Array{T,1}(Int(m))
@@ -125,9 +126,12 @@ include("reduce.jl")
 include("reshapedarray.jl")
 include("bitarray.jl")
 include("intset.jl")
+include("associative.jl")
 include("dict.jl")
 include("set.jl")
-include("iterator.jl")
+include("iterators.jl")
+using .Iterators: zip, enumerate
+using .Iterators: Flatten, product  # for generators
 
 # Definition of StridedArray
 typealias StridedReshapedArray{T,N,A<:DenseArray} ReshapedArray{T,N,A}
@@ -243,7 +247,7 @@ include("mpfr.jl")
 importall .MPFR
 big(n::Integer) = convert(BigInt,n)
 big(x::AbstractFloat) = convert(BigFloat,x)
-big(q::Rational) = big(num(q))//big(den(q))
+big(q::Rational) = big(numerator(q))//big(denominator(q))
 
 include("combinatorics.jl")
 
@@ -273,9 +277,7 @@ include("channels.jl")
 include("clusterserialize.jl")
 include("multi.jl")
 include("workerpool.jl")
-include("pmap.jl")
 include("managers.jl")
-include("asyncmap.jl")
 
 # code loading
 include("loading.jl")
@@ -356,6 +358,10 @@ import .Dates: Date, DateTime, now
 # sparse matrices, vectors, and sparse linear algebra
 include("sparse/sparse.jl")
 importall .SparseArrays
+
+# parallel map
+include("asyncmap.jl")
+include("pmap.jl")
 
 # worker threads
 include("threadcall.jl")

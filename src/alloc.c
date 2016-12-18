@@ -404,8 +404,9 @@ JL_DLLEXPORT jl_method_instance_t *jl_new_method_instance_uninit(void)
     jl_ptls_t ptls = jl_get_ptls_states();
     jl_method_instance_t *li =
         (jl_method_instance_t*)jl_gc_alloc(ptls, sizeof(jl_method_instance_t),
-                                       jl_method_instance_type);
+                                           jl_method_instance_type);
     li->inferred = NULL;
+    li->inferred_const = NULL;
     li->rettype = (jl_value_t*)jl_any_type;
     li->sparam_vals = jl_emptysvec;
     li->fptr = NULL;
@@ -456,7 +457,7 @@ STATIC_INLINE jl_value_t *jl_call_staged(jl_svec_t *sparam_vals, jl_method_insta
     fptr.fptr = generator->fptr;
     fptr.jlcall_api = generator->jlcall_api;
     if (__unlikely(fptr.fptr == NULL || fptr.jlcall_api == 0)) {
-        void *F = jl_compile_linfo(generator, (jl_code_info_t*)generator->inferred).functionObject;
+        void *F = jl_compile_linfo(generator, (jl_code_info_t*)generator->inferred, &jl_default_cgparams).functionObject;
         fptr = jl_generate_fptr(generator, F);
     }
     assert(jl_svec_len(generator->def->sparam_syms) == jl_svec_len(sparam_vals));
@@ -529,8 +530,11 @@ JL_DLLEXPORT jl_code_info_t *jl_code_for_staged(jl_method_instance_t *linfo)
         }
 
         func = (jl_code_info_t*)jl_expand((jl_value_t*)ex);
-        if (!jl_is_code_info(func))
+        if (!jl_is_code_info(func)) {
+            if (jl_is_expr(func) && ((jl_expr_t*)func)->head == error_sym)
+                jl_interpret_toplevel_expr((jl_value_t*)func);
             jl_error("generated function body is not pure. this likely means it contains a closure or comprehension.");
+        }
 
         jl_array_t *stmts = (jl_array_t*)func->code;
         for (i = 0, l = jl_array_len(stmts); i < l; i++) {
@@ -1006,7 +1010,12 @@ void jl_compute_field_offsets(jl_datatype_t *st)
     uint64_t max_size = max_offset >> 1;
 
     uint32_t nfields = jl_svec_len(st->types);
-    jl_fielddesc32_t* desc = (jl_fielddesc32_t*) alloca(nfields * sizeof(jl_fielddesc32_t));
+    size_t descsz = nfields * sizeof(jl_fielddesc32_t);
+    jl_fielddesc32_t *desc;
+    if (descsz < jl_page_size)
+        desc = (jl_fielddesc32_t*)alloca(descsz);
+    else
+        desc = (jl_fielddesc32_t*)malloc(descsz);
     int haspadding = 0;
     assert(st->name == jl_tuple_typename ||
            st == jl_sym_type ||
@@ -1020,7 +1029,7 @@ void jl_compute_field_offsets(jl_datatype_t *st)
             fsz = jl_datatype_size(ty);
             // Should never happen
             if (__unlikely(fsz > max_size))
-                jl_throw(jl_overflow_exception);
+                goto throw_ovf;
             al = ((jl_datatype_t*)ty)->layout->alignment;
             desc[i].isptr = 0;
             if (((jl_datatype_t*)ty)->layout->haspadding)
@@ -1046,7 +1055,7 @@ void jl_compute_field_offsets(jl_datatype_t *st)
         desc[i].offset = sz;
         desc[i].size = fsz;
         if (__unlikely(max_offset - sz < fsz))
-            jl_throw(jl_overflow_exception);
+            goto throw_ovf;
         sz += fsz;
     }
     if (homogeneous && lastty!=NULL && jl_is_tuple_type(st)) {
@@ -1060,6 +1069,11 @@ void jl_compute_field_offsets(jl_datatype_t *st)
     if (st->size > sz)
         haspadding = 1;
     st->layout = jl_get_layout(nfields, alignm, haspadding, desc);
+    if (descsz >= jl_page_size) free(desc);
+    return;
+ throw_ovf:
+    if (descsz >= jl_page_size) free(desc);
+    jl_throw(jl_overflow_exception);
 }
 
 extern int jl_boot_file_loaded;

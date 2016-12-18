@@ -418,6 +418,13 @@ function copy_dense{Tv<:VTypes}(A::Dense{Tv})
     d
 end
 
+function sort!{Tv<:VTypes}(S::Sparse{Tv})
+    @isok ccall((:cholmod_l_sort, :libcholmod), SuiteSparse_long,
+        (Ptr{C_Sparse{Tv}}, Ptr{UInt8}),
+         get(S.p), common())
+    return S
+end
+
 ### cholmod_matrixops.h ###
 function norm_dense{Tv<:VTypes}(D::Dense{Tv}, p::Integer)
     s = unsafe_load(get(D.p))
@@ -851,6 +858,9 @@ end
 function (::Type{Sparse}){Tv<:VTypes}(m::Integer, n::Integer, colptr::Vector{SuiteSparse_long}, rowval::Vector{SuiteSparse_long}, nzval::Vector{Tv})
     o = Sparse(m, n, colptr, rowval, nzval, 0)
 
+    # sort indices
+    sort!(o)
+
     # check if array is symmetric and change stype if it is
     if ishermitian(o)
         change_stype!(o, -1)
@@ -993,21 +1003,51 @@ function convert{Tv}(::Type{SparseMatrixCSC{Tv,SuiteSparse_long}}, A::Sparse{Tv}
     if s.stype != 0
         throw(ArgumentError("matrix has stype != 0. Convert to matrix with stype == 0 before converting to SparseMatrixCSC"))
     end
-    return SparseMatrixCSC(s.nrow, s.ncol, increment(unsafe_wrap(Array, s.p, (s.ncol + 1,), false)), increment(unsafe_wrap(Array, s.i, (s.nzmax,), false)), copy(unsafe_wrap(Array, s.x, (s.nzmax,), false)))
+
+    B = SparseMatrixCSC(s.nrow, s.ncol,
+        increment(unsafe_wrap(Array, s.p, (s.ncol + 1,), false)),
+        increment(unsafe_wrap(Array, s.i, (s.nzmax,), false)),
+        copy(unsafe_wrap(Array, s.x, (s.nzmax,), false)))
+
+    if s.sorted == 0
+        return SparseArrays.sortSparseMatrixCSC!(B)
+    else
+        return B
+    end
 end
 function convert(::Type{Symmetric{Float64,SparseMatrixCSC{Float64,SuiteSparse_long}}}, A::Sparse{Float64})
     s = unsafe_load(A.p)
     if !issymmetric(A)
         throw(ArgumentError("matrix is not symmetric"))
     end
-    return Symmetric(SparseMatrixCSC(s.nrow, s.ncol, increment(unsafe_wrap(Array, s.p, (s.ncol + 1,), false)), increment(unsafe_wrap(Array, s.i, (s.nzmax,), false)), copy(unsafe_wrap(Array, s.x, (s.nzmax,), false))), s.stype > 0 ? :U : :L)
+
+    B = Symmetric(SparseMatrixCSC(s.nrow, s.ncol,
+        increment(unsafe_wrap(Array, s.p, (s.ncol + 1,), false)),
+        increment(unsafe_wrap(Array, s.i, (s.nzmax,), false)),
+        copy(unsafe_wrap(Array, s.x, (s.nzmax,), false))), s.stype > 0 ? :U : :L)
+
+    if s.sorted == 0
+        return SparseArrays.sortSparseMatrixCSC!(B.data)
+    else
+        return B
+    end
 end
 function convert{Tv<:VTypes}(::Type{Hermitian{Tv,SparseMatrixCSC{Tv,SuiteSparse_long}}}, A::Sparse{Tv})
     s = unsafe_load(A.p)
     if !ishermitian(A)
         throw(ArgumentError("matrix is not Hermitian"))
     end
-    return Hermitian(SparseMatrixCSC(s.nrow, s.ncol, increment(unsafe_wrap(Array, s.p, (s.ncol + 1,), false)), increment(unsafe_wrap(Array, s.i, (s.nzmax,), false)), copy(unsafe_wrap(Array, s.x, (s.nzmax,), false))), s.stype > 0 ? :U : :L)
+
+    B = Hermitian(SparseMatrixCSC(s.nrow, s.ncol,
+        increment(unsafe_wrap(Array, s.p, (s.ncol + 1,), false)),
+        increment(unsafe_wrap(Array, s.i, (s.nzmax,), false)),
+        copy(unsafe_wrap(Array, s.x, (s.nzmax,), false))), s.stype > 0 ? :U : :L)
+
+    if s.sorted == 0
+        return SparseArrays.sortSparseMatrixCSC!(B.data)
+    else
+        return B
+    end
 end
 function sparse(A::Sparse{Float64}) # Notice! Cannot be type stable because of stype
     s = unsafe_load(A.p)
@@ -1185,7 +1225,7 @@ end
 function A_mul_Bc{Tv<:VRealTypes}(A::Sparse{Tv}, B::Sparse{Tv})
     cm = common()
 
-    if !is(A,B)
+    if A !== B
         aa1 = transpose_(B, 2)
         ## result of ssmult will have stype==0, contain numerical values and be sorted
         return ssmult(A, aa1, 0, true, true)
@@ -1205,7 +1245,7 @@ end
 
 function Ac_mul_B(A::Sparse, B::Sparse)
     aa1 = transpose_(A, 2)
-    if is(A,B)
+    if A === B
         return A_mul_Bc(aa1, aa1)
     end
     ## result of ssmult will have stype==0, contain numerical values and be sorted
@@ -1264,7 +1304,7 @@ factorization `F`. `A` must be a `SparseMatrixCSC`, `Symmetric{SparseMatrixCSC}`
 or `Hermitian{SparseMatrixCSC}`. Note that even if `A` doesn't
 have the type tag, it must still be symmetric or Hermitian.
 
-See also [`cholfact`](:func:`cholfact`).
+See also [`cholfact`](@ref).
 
 !!! note
     This method uses the CHOLMOD library from SuiteSparse, which only supports
@@ -1306,8 +1346,8 @@ Compute the Cholesky factorization of a sparse positive definite matrix `A`.
 have the type tag, it must still be symmetric or Hermitian.
 A fill-reducing permutation is used.
 `F = cholfact(A)` is most frequently used to solve systems of equations with `F\\b`,
-but also the methods [`diag`](:func:`diag`), [`det`](:func:`det`), and
-[`logdet`](:func:`logdet`) are defined for `F`.
+but also the methods [`diag`](@ref), [`det`](@ref), and
+[`logdet`](@ref) are defined for `F`.
 You can also extract individual factors from `F`, using `F[:L]`.
 However, since pivoting is on by default, the factorization is internally
 represented as `A == P'*L*L'*P` with a permutation matrix `P`;
@@ -1340,14 +1380,8 @@ cholfact{T<:Real}(A::Union{SparseMatrixCSC{T}, SparseMatrixCSC{Complex{T}},
 function ldltfact!{Tv}(F::Factor{Tv}, A::Sparse{Tv}; shift::Real=0.0)
     cm = common()
 
-    # Makes it an LDLt
-    unsafe_store!(common_final_ll, 0)
-
     # Compute the numerical factorization
     factorize_p!(A, shift, F, cm)
-
-    # Really make sure it's an LDLt by avoiding supernodal factorisation
-    unsafe_store!(common_supernodal, 0)
 
     s = unsafe_load(get(F.p))
     s.minor < size(A, 1) && throw(Base.LinAlg.ArgumentError("matrix has one or more zero pivots"))
@@ -1362,7 +1396,7 @@ Compute the ``LDL'`` factorization of `A`, reusing the symbolic factorization `F
 `Hermitian{SparseMatrixCSC}`. Note that even if `A` doesn't
 have the type tag, it must still be symmetric or Hermitian.
 
-See also [`ldltfact`](:func:`ldltfact`).
+See also [`ldltfact`](@ref).
 
 !!! note
     This method uses the CHOLMOD library from SuiteSparse, which only supports
@@ -1384,6 +1418,11 @@ function ldltfact(A::Sparse; shift::Real=0.0,
     cm = defaults(common())
     set_print_level(cm, 0)
 
+    # Makes it an LDLt
+    unsafe_store!(common_final_ll, 0)
+    # Really make sure it's an LDLt by avoiding supernodal factorisation
+    unsafe_store!(common_supernodal, 0)
+
     # Compute the symbolic factorization
     F = fact_(A, cm; perm = perm)
 
@@ -1404,8 +1443,8 @@ Compute the ``LDL'`` factorization of a sparse matrix `A`.
 have the type tag, it must still be symmetric or Hermitian.
 A fill-reducing permutation is used. `F = ldltfact(A)` is most frequently
 used to solve systems of equations `A*x = b` with `F\\b`. The returned
-factorization object `F` also supports the methods [`diag`](:func:`diag`),
-[`det`](:func:`det`), and [`logdet`](:func:`logdet`).
+factorization object `F` also supports the methods [`diag`](@ref),
+[`det`](@ref), and [`logdet`](@ref).
 You can extract individual factors from `F` using `F[:L]`.
 However, since pivoting is on by default, the factorization is internally
 represented as `A == P'*L*D*L'*P` with a permutation matrix `P`;
@@ -1505,6 +1544,19 @@ Ac_ldiv_B(L::Factor, B::VecOrMat) = convert(Matrix, solve(CHOLMOD_A, L, Dense(B)
 Ac_ldiv_B(L::Factor, B::Sparse) = spsolve(CHOLMOD_A, L, B)
 Ac_ldiv_B(L::Factor, B::SparseVecOrMat) = Ac_ldiv_B(L, Sparse(B))
 
+for f in (:\, :Ac_ldiv_B)
+    @eval function ($f)(A::Union{Symmetric{Float64,SparseMatrixCSC{Float64,SuiteSparse_long}},
+                          Hermitian{Float64,SparseMatrixCSC{Float64,SuiteSparse_long}},
+                          Hermitian{Complex{Float64},SparseMatrixCSC{Complex{Float64},SuiteSparse_long}}}, B::StridedVecOrMat)
+        try
+            return ($f)(cholfact(A), B)
+        catch e
+            isa(e, LinAlg.PosDefException) || rethrow(e)
+            return ($f)(ldltfact(A) , B)
+        end
+    end
+end
+
 ## Other convenience methods
 function diag{Tv}(F::Factor{Tv})
     f = unsafe_load(get(F.p))
@@ -1559,21 +1611,16 @@ function isposdef{Tv<:VTypes}(A::SparseMatrixCSC{Tv,SuiteSparse_long})
     true
 end
 
-function issymmetric(A::Sparse)
-    s = unsafe_load(A.p)
-    if s.stype != 0
-        return isreal(A)
-    end
-    i = symmetry(A, 1)[1]
-    return i == MM_SYMMETRIC || i == MM_SYMMETRIC_POSDIAG
-end
-
 function ishermitian(A::Sparse{Float64})
     s = unsafe_load(A.p)
     if s.stype != 0
         return true
     else
         i = symmetry(A, 1)[1]
+        if i < 0
+            throw(CHOLMODException("negative value returned from CHOLMOD's symmetry function. This
+                is either because the indices are not sorted or because of a memory error"))
+        end
         return i == MM_SYMMETRIC || i == MM_SYMMETRIC_POSDIAG
     end
 end
@@ -1583,6 +1630,10 @@ function ishermitian(A::Sparse{Complex{Float64}})
         return true
     else
         i = symmetry(A, 1)[1]
+        if i < 0
+            throw(CHOLMODException("negative value returned from CHOLMOD's symmetry function. This
+                is either because the indices are not sorted or because of a memory error"))
+        end
         return i == MM_HERMITIAN || i == MM_HERMITIAN_POSDIAG
     end
 end
