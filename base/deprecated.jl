@@ -1154,6 +1154,7 @@ for (dep, f, op) in [(:sumabs!, :sum!, :abs),
     end
 end
 
+# #19660
 @deprecate finalize(sa::LibGit2.StrArrayStruct) close(sa)
 @deprecate finalize(sa::LibGit2.Buffer) close(sa)
 @deprecate finalize(sa::LibGit2.AbstractGitObject) close(sa)
