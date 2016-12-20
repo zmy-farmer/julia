@@ -32,7 +32,7 @@ immutable StrArrayStruct
    count::Csize_t
 end
 StrArrayStruct() = StrArrayStruct(Ptr{Cstring}(C_NULL), zero(Csize_t))
-function Base.finalize(sa::StrArrayStruct)
+function Base.close(sa::StrArrayStruct)
     sa_ptr = Ref(sa)
     ccall((:git_strarray_free, :libgit2), Void, (Ptr{StrArrayStruct},), sa_ptr)
     return sa_ptr[]
@@ -44,7 +44,7 @@ immutable Buffer
     size::Csize_t
 end
 Buffer() = Buffer(Ptr{Cchar}(C_NULL), zero(Csize_t), zero(Csize_t))
-function Base.finalize(buf::Buffer)
+function Base.close(buf::Buffer)
     buf_ptr = Ref(buf)
     ccall((:git_buf_free, :libgit2), Void, (Ptr{Buffer},), buf_ptr)
     return buf_ptr[]
@@ -574,7 +574,7 @@ abstract AbstractGitObject
 Base.isempty(obj::AbstractGitObject) = (obj.ptr == C_NULL)
 
 abstract GitObject <: AbstractGitObject
-function Base.finalize(obj::GitObject)
+function Base.close(obj::GitObject)
     if obj.ptr != C_NULL
         ccall((:git_object_free, :libgit2), Void, (Ptr{Void},), obj.ptr)
         obj.ptr = C_NULL
@@ -613,7 +613,7 @@ for (typ, ref, sup, fnc) in (
     end
 
     if fnc !== nothing
-        @eval function Base.finalize(obj::$typ)
+        @eval function Base.close(obj::$typ)
             if obj.ptr != C_NULL
                 ccall(($fnc, :libgit2), Void, (Ptr{$ref},), obj.ptr)
                 obj.ptr = C_NULL
@@ -637,7 +637,7 @@ function with(f::Function, obj)
     try
         f(obj)
     finally
-        finalize(obj)
+        close(obj)
     end
 end
 
