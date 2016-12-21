@@ -1277,20 +1277,6 @@ function mod(x::Number, B::BitArray)
     return fill(y, size(B))
 end
 
-for f in (:div, :mod)
-    @eval begin
-        function ($f)(B::BitArray, x::Number)
-            T = promote_op($f, Bool, typeof(x))
-            T === Any && return [($f)(b, x) for b in B]
-            F = Array{T}(size(B))
-            for i = 1:length(F)
-                F[i] = ($f)(B[i], x)
-            end
-            return F
-        end
-    end
-end
-
 function (&)(B::BitArray, x::Bool)
     x ? copy(B) : falses(size(B))
 end
