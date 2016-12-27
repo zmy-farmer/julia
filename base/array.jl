@@ -1312,7 +1312,7 @@ function find(testf::Function, A)
     return I
 end
 _index_remapper(A::AbstractArray) = linearindices(A)
-_index_remapper(iter) = Colon()  # safe for objects that don't implement length
+_index_remapper(iter) = OneTo(typemax(Int))  # safe for objects that don't implement length
 
 """
     find(A)
